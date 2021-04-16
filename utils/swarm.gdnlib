@@ -7,8 +7,10 @@ reloadable=true
 
 [entry]
 
+OSX.64="res://rust/target/release/libbevy_godot_swarm.dylib"
 Windows.64="res://rust/target/release/bevy_godot_swarm.dll"
 
 [dependencies]
 
+OSX.64=[  ]
 Windows.64=[  ]

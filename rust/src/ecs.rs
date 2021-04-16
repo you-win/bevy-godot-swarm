@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::RunOnce;
-use gdnative::api::{InputEvent, VisualServer};
+use gdnative::api::{Input, VisualServer};
 use gdnative::prelude::*;
 
 struct Renderable {
@@ -65,7 +65,7 @@ impl ECS {
                 return schedule.add_system_to_stage(Stages::Startup, hello_world.system());
             })
             // Preupdate
-            // TODO
+            .add_system_to_stage(Stages::Postupdate, cleanup_rids.system())
             // Update
             .add_system_to_stage(Stages::Update, debug_move_right.system())
             // Postupdate
@@ -99,10 +99,13 @@ impl ECS {
     }
 
     #[export]
-    fn read_input(&mut self, _owner: &Reference, event_string: GodotString) {
-        match event_string.to_string().as_str() {
-            "move_up" => godot_print!("hello"),
-            _ => godot_print!("{}", event_string.to_string().as_str()),
+    fn read_input(&mut self, _owner: &Reference) {
+        let input_handler = Input::godot_singleton();
+        if input_handler.is_action_pressed("move_up") {
+            godot_print!("up!")
+        }
+        if input_handler.is_action_pressed("move_down") {
+            godot_print!("down!")
         }
     }
 }

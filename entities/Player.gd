@@ -7,8 +7,8 @@ extends Polygon2D
 func _ready() -> void:
 	GameManager.ecs.register_entity(get_canvas_item(), global_transform)
 
-func _unhandled_input(event: InputEvent) -> void:
-	GameManager.ecs.read_input(event.as_text())
+func _exit_tree():
+	GameManager.ecs.unregister_entity_deferred(get_canvas_item())
 
 ###############################################################################
 # Connections                                                                 #

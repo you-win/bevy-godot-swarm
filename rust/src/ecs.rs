@@ -1,7 +1,12 @@
+use std::collections::{vec_deque::Drain, VecDeque};
+
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::RunOnce;
 use gdnative::api::{Input, VisualServer};
 use gdnative::prelude::*;
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+struct Cleanup;
 
 struct Renderable {
     rid: Rid,
@@ -13,9 +18,38 @@ struct RenderablesToRemove {
     vec: Vec<Rid>,
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+enum GodotInput {
+    MoveUp,
+    MoveDown,
+    MoveLeft,
+    MoveRight,
+}
+
 #[derive(Clone)]
 struct InputQueue {
-    vec: Vec<i32>,
+    queue: VecDeque<GodotInput>,
+}
+
+impl InputQueue {
+    pub fn new() -> Self {
+        let mut queue: VecDeque<GodotInput> = VecDeque::new();
+        queue.make_contiguous();
+        return InputQueue { queue: queue };
+    }
+
+    pub fn add(&mut self, data: GodotInput) {
+        self.queue.push_back(data);
+    }
+
+    #[warn(dead_code)]
+    pub fn read_single(&mut self) -> Option<GodotInput> {
+        return self.queue.pop_front();
+    }
+
+    pub fn read_all(&mut self) -> Drain<'_, GodotInput> {
+        return self.queue.drain(..);
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
@@ -45,6 +79,7 @@ impl ECS {
         // Insert resources
         ecs.world
             .insert_resource(RenderablesToRemove { vec: vec![] });
+        ecs.world.insert_resource(InputQueue::new());
 
         // Add stages
         ecs.schedule
@@ -65,19 +100,18 @@ impl ECS {
                 return schedule.add_system_to_stage(Stages::Startup, hello_world.system());
             })
             // Preupdate
-            .add_system_to_stage(Stages::Postupdate, cleanup_rids.system())
+            .add_system_to_stage(Stages::Preupdate, cleanup_rids.system().label(Cleanup))
+            .add_system_to_stage(Stages::Preupdate, handle_input.system().after(Cleanup))
             // Update
-            .add_system_to_stage(Stages::Update, debug_move_right.system())
-            // Postupdate
-            .add_system_to_stage(Stages::Postupdate, cleanup_rids.system());
+            .add_system_to_stage(Stages::Update, move_player.system());
+        // Postupdate
         // .add_system_to_stage(Stages::Postupdate, debug_print_positions.system());
 
         return ecs;
     }
 
     #[export]
-    fn step(&mut self, _owner: &Reference, delta: f32) {
-        // godot_print!("step {}", delta)
+    fn step(&mut self, _owner: &Reference, _delta: f32) {
         self.schedule.run(&mut self.world);
     }
 
@@ -100,12 +134,19 @@ impl ECS {
 
     #[export]
     fn read_input(&mut self, _owner: &Reference) {
+        let mut input_queue = self.world.get_resource_mut::<InputQueue>().unwrap();
         let input_handler = Input::godot_singleton();
         if input_handler.is_action_pressed("move_up") {
-            godot_print!("up!")
+            input_queue.add(GodotInput::MoveUp);
         }
         if input_handler.is_action_pressed("move_down") {
-            godot_print!("down!")
+            input_queue.add(GodotInput::MoveDown);
+        }
+        if input_handler.is_action_pressed("move_left") {
+            input_queue.add(GodotInput::MoveLeft);
+        }
+        if input_handler.is_action_pressed("move_right") {
+            input_queue.add(GodotInput::MoveRight);
         }
     }
 }
@@ -114,6 +155,7 @@ impl ECS {
 * Systems
 */
 
+// TODO debug
 fn hello_world() {
     godot_print!("hello world");
 }
@@ -133,10 +175,26 @@ fn cleanup_rids(
             .any(|&rid| rid == renderable.rid)
         {
             commands.entity(entity).despawn();
+            unsafe {
+                VisualServer::godot_singleton().free_rid(renderable.rid);
+            }
         }
     }
 
     renderables_to_remove.vec.clear();
+}
+
+fn handle_input(mut input_queue: ResMut<InputQueue>, mut query: Query<&mut Renderable>) {
+    for mut r in query.iter_mut() {
+        for input in input_queue.read_all() {
+            match input {
+                GodotInput::MoveUp => r.global_transform.m32 -= 1.0,
+                GodotInput::MoveDown => r.global_transform.m32 += 1.0,
+                GodotInput::MoveLeft => r.global_transform.m31 -= 1.0,
+                GodotInput::MoveRight => r.global_transform.m31 += 1.0,
+            }
+        }
+    }
 }
 
 #[warn(dead_code)]
@@ -147,10 +205,8 @@ fn debug_print_positions(query: Query<&Renderable>) {
 }
 
 #[warn(dead_code)]
-fn debug_move_right(mut query: Query<&mut Renderable>) {
-    for mut r in query.iter_mut() {
-        // TODO can use translation() if we implement the associated type?
-        r.global_transform.m31 += 1.0;
+fn move_player(query: Query<&Renderable>) {
+    for r in query.iter() {
         unsafe {
             VisualServer::godot_singleton().canvas_item_set_transform(r.rid, r.global_transform);
         }

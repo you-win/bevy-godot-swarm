@@ -1,4 +1,4 @@
-use std::collections::{vec_deque::Drain, VecDeque};
+use std::collections::{vec_deque::Drain, HashMap, VecDeque};
 
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::RunOnce;
@@ -8,15 +8,11 @@ use gdnative::prelude::*;
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 struct Cleanup;
 
-struct Renderable {
-    rid: Rid,
-    global_transform: Transform2D,
-}
+type Renderable = Vector2;
 
-#[derive(Clone)]
-struct RenderablesToRemove {
-    vec: Vec<Rid>,
-}
+type Named = String;
+
+type RenderablesToRemove = Vec<String>;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 enum GodotInput {
@@ -26,7 +22,6 @@ enum GodotInput {
     MoveRight,
 }
 
-#[derive(Clone)]
 struct InputQueue {
     queue: VecDeque<GodotInput>,
 }
@@ -51,6 +46,8 @@ impl InputQueue {
         return self.queue.drain(..);
     }
 }
+
+type GodotData = HashMap<String, Vector2>;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 enum Stages {
@@ -77,9 +74,9 @@ impl ECS {
         };
 
         // Insert resources
-        ecs.world
-            .insert_resource(RenderablesToRemove { vec: vec![] });
+        ecs.world.insert_resource(RenderablesToRemove::default());
         ecs.world.insert_resource(InputQueue::new());
+        ecs.world.insert_resource(GodotData::default());
 
         // Add stages
         ecs.schedule
@@ -100,10 +97,10 @@ impl ECS {
                 return schedule.add_system_to_stage(Stages::Startup, hello_world.system());
             })
             // Preupdate
-            .add_system_to_stage(Stages::Preupdate, cleanup_rids.system().label(Cleanup))
-            .add_system_to_stage(Stages::Preupdate, handle_input.system().after(Cleanup))
-            // Update
-            .add_system_to_stage(Stages::Update, move_player.system());
+            .add_system_to_stage(Stages::Preupdate, cleanup_entities.system().label(Cleanup))
+            .add_system_to_stage(Stages::Preupdate, handle_input.system().after(Cleanup));
+        // Update
+        // .add_system_to_stage(Stages::Update, move_player.system());
         // Postupdate
         // .add_system_to_stage(Stages::Postupdate, debug_print_positions.system());
 
@@ -116,20 +113,22 @@ impl ECS {
     }
 
     #[export]
-    fn register_entity(&mut self, _owner: &Reference, rid: Rid, global_transform: Transform2D) {
-        self.world.spawn().insert(Renderable {
-            rid: rid,
-            global_transform: global_transform,
-        });
+    fn register_entity(&mut self, _owner: &Reference, name: String, global_position: Vector2) {
+        self.world
+            .spawn()
+            .insert(Renderable::from(global_position))
+            .insert(Named::from(&name));
+        let mut godot_data = self.world.get_resource_mut::<GodotData>().unwrap();
+        godot_data.insert(name, global_position);
     }
 
     #[export]
-    fn unregister_entity_deferred(&mut self, _owner: &Reference, rid: Rid) {
+    fn unregister_entity_deferred(&mut self, _owner: &Reference, name: String) {
         let mut renderables_to_remove = self
             .world
             .get_resource_mut::<RenderablesToRemove>()
             .unwrap();
-        renderables_to_remove.vec.push(rid);
+        renderables_to_remove.push(name);
     }
 
     #[export]
@@ -149,6 +148,13 @@ impl ECS {
             input_queue.add(GodotInput::MoveRight);
         }
     }
+
+    #[export]
+    fn read_data(&mut self, _owner: &Reference, key: String) -> Vector2 {
+        let godot_data = self.world.get_resource::<GodotData>().unwrap();
+
+        return *godot_data.get(&key).unwrap_or(&Vector2::default());
+    }
 }
 
 /*
@@ -160,55 +166,44 @@ fn hello_world() {
     godot_print!("hello world");
 }
 
-fn cleanup_rids(
+fn cleanup_entities(
     mut commands: Commands,
     mut renderables_to_remove: ResMut<RenderablesToRemove>,
-    query: Query<(Entity, &Renderable)>,
+    mut query: Query<(Entity, &Named)>,
 ) {
-    if renderables_to_remove.vec.len() == 0 {
-        return;
-    }
-    for (entity, renderable) in query.iter() {
+    for (entity, name) in query.iter_mut() {
         if renderables_to_remove
-            .vec
-            .iter()
-            .any(|&rid| rid == renderable.rid)
+            .drain(..)
+            .any(|value| value == name.to_string())
         {
             commands.entity(entity).despawn();
-            unsafe {
-                VisualServer::godot_singleton().free_rid(renderable.rid);
-            }
         }
     }
-
-    renderables_to_remove.vec.clear();
 }
 
-fn handle_input(mut input_queue: ResMut<InputQueue>, mut query: Query<&mut Renderable>) {
-    for mut r in query.iter_mut() {
+fn handle_input(
+    mut input_queue: ResMut<InputQueue>,
+    mut godot_data: ResMut<GodotData>,
+    mut query: Query<(&Named, &mut Renderable)>,
+) {
+    for (n, mut r) in query.iter_mut() {
         for input in input_queue.read_all() {
             match input {
-                GodotInput::MoveUp => r.global_transform.m32 -= 1.0,
-                GodotInput::MoveDown => r.global_transform.m32 += 1.0,
-                GodotInput::MoveLeft => r.global_transform.m31 -= 1.0,
-                GodotInput::MoveRight => r.global_transform.m31 += 1.0,
+                GodotInput::MoveUp => r.y -= 1.0,
+                GodotInput::MoveDown => r.y += 1.0,
+                GodotInput::MoveLeft => r.x -= 1.0,
+                GodotInput::MoveRight => r.x += 1.0,
             }
         }
+        let data = godot_data.get_mut(n).unwrap();
+        data.x = r.x;
+        data.y = r.y;
     }
 }
 
 #[warn(dead_code)]
 fn debug_print_positions(query: Query<&Renderable>) {
     for r in query.iter() {
-        godot_print!("{}, {}", r.global_transform.m31, r.global_transform.m32)
-    }
-}
-
-#[warn(dead_code)]
-fn move_player(query: Query<&Renderable>) {
-    for r in query.iter() {
-        unsafe {
-            VisualServer::godot_singleton().canvas_item_set_transform(r.rid, r.global_transform);
-        }
+        godot_print!("{}, {}", r.x, r.y)
     }
 }

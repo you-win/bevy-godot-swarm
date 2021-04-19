@@ -5,10 +5,13 @@ extends Polygon2D
 ###############################################################################
 
 func _ready() -> void:
-	GameManager.ecs.register_entity(get_canvas_item(), global_transform)
+	GameManager.ecs.register_entity(self.name, global_position)
+
+func _physics_process(delta: float) -> void:
+	self.global_position = GameManager.ecs.read_data(self.name)
 
 func _exit_tree():
-	GameManager.ecs.unregister_entity_deferred(get_canvas_item())
+	GameManager.ecs.unregister_entity_deferred(self.name)
 
 ###############################################################################
 # Connections                                                                 #

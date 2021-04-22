@@ -5,14 +5,26 @@ use bevy_ecs::schedule::RunOnce;
 use gdnative::api::{Input, VisualServer};
 use gdnative::prelude::*;
 
+// TODO unused
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
 struct Cleanup;
 
-type Renderable = Vector2;
+struct Renderable(Vector2);
 
+// TODO unused
 type Named = String;
 
+struct GodotId(i32);
+
+struct Velocity(Vector2);
+
 type RenderablesToRemove = Vec<String>;
+
+struct Player;
+
+// type Delta = f32;
+#[derive(Default)]
+struct Delta(f32);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 enum GodotInput {
@@ -47,7 +59,8 @@ impl InputQueue {
     }
 }
 
-type GodotData = HashMap<String, Vector2>;
+#[derive(Default)]
+struct GodotData(HashMap<i32, Vector2>);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 enum Stages {
@@ -77,6 +90,7 @@ impl ECS {
         ecs.world.insert_resource(RenderablesToRemove::default());
         ecs.world.insert_resource(InputQueue::new());
         ecs.world.insert_resource(GodotData::default());
+        ecs.world.insert_resource(Delta::default());
 
         // Add stages
         ecs.schedule
@@ -97,10 +111,10 @@ impl ECS {
                 return schedule.add_system_to_stage(Stages::Startup, hello_world.system());
             })
             // Preupdate
-            .add_system_to_stage(Stages::Preupdate, cleanup_entities.system().label(Cleanup))
-            .add_system_to_stage(Stages::Preupdate, handle_input.system().after(Cleanup));
-        // Update
-        // .add_system_to_stage(Stages::Update, move_player.system());
+            // .add_system_to_stage(Stages::Preupdate, cleanup_entities.system().label(Cleanup))
+            .add_system_to_stage(Stages::Preupdate, handle_input.system())
+            // Update
+            .add_system_to_stage(Stages::Update, mob_movement.system());
         // Postupdate
         // .add_system_to_stage(Stages::Postupdate, debug_print_positions.system());
 
@@ -108,27 +122,72 @@ impl ECS {
     }
 
     #[export]
-    fn step(&mut self, _owner: &Reference, _delta: f32) {
+    fn step(&mut self, _owner: &Reference, delta: f32) {
+        let mut delta_resource = self.world.get_resource_mut::<Delta>().unwrap();
+        delta_resource.0 = delta;
         self.schedule.run(&mut self.world);
     }
 
     #[export]
-    fn register_entity(&mut self, _owner: &Reference, name: String, global_position: Vector2) {
+    fn register_entity(
+        &mut self,
+        _owner: &Reference,
+        id: i32,
+        global_position: Vector2,
+        velocity: Vector2,
+    ) {
         self.world
             .spawn()
-            .insert(Renderable::from(global_position))
-            .insert(Named::from(&name));
+            .insert(GodotId(id))
+            .insert(Renderable(global_position))
+            .insert(Velocity(velocity));
         let mut godot_data = self.world.get_resource_mut::<GodotData>().unwrap();
-        godot_data.insert(name, global_position);
+        godot_data.0.insert(id, global_position);
     }
 
     #[export]
-    fn unregister_entity_deferred(&mut self, _owner: &Reference, name: String) {
-        let mut renderables_to_remove = self
+    fn register_player(&mut self, _owner: &Reference, id: i32, global_position: Vector2) {
+        self.world
+            .spawn()
+            .insert(GodotId(id))
+            .insert(Renderable(global_position))
+            .insert(Player);
+        let mut godot_data = self.world.get_resource_mut::<GodotData>().unwrap();
+        godot_data.0.insert(id, global_position);
+    }
+
+    #[export]
+    fn register_mob(
+        &mut self,
+        _owner: &Reference,
+        id: i32,
+        global_position: Vector2,
+        velocity: Vector2,
+    ) {
+        self.world
+            .spawn()
+            .insert(GodotId(id))
+            .insert(Renderable(global_position))
+            .insert(Velocity(velocity));
+        let mut godot_data = self.world.get_resource_mut::<GodotData>().unwrap();
+        godot_data.0.insert(id, global_position);
+    }
+
+    #[export]
+    fn unregister_entity(&mut self, _owner: &Reference, id: i32) {
+        let entity_to_remove = self
             .world
-            .get_resource_mut::<RenderablesToRemove>()
-            .unwrap();
-        renderables_to_remove.push(name);
+            .query::<(Entity, &GodotId)>()
+            .iter_mut(&mut self.world)
+            .find(|(_, gid)| gid.0 == id)
+            .map(|t| t.0);
+
+        if let Some(e) = entity_to_remove {
+            self.world.despawn(e);
+        }
+
+        let mut godot_data = self.world.get_resource_mut::<GodotData>().unwrap();
+        godot_data.0.remove(&id);
     }
 
     #[export]
@@ -150,10 +209,10 @@ impl ECS {
     }
 
     #[export]
-    fn read_data(&mut self, _owner: &Reference, key: String) -> Vector2 {
+    fn read_data(&mut self, _owner: &Reference, id: i32) -> Vector2 {
         let godot_data = self.world.get_resource::<GodotData>().unwrap();
 
-        return *godot_data.get(&key).unwrap_or(&Vector2::default());
+        return *godot_data.0.get(&id).unwrap_or(&Vector2::default());
     }
 }
 
@@ -166,44 +225,59 @@ fn hello_world() {
     godot_print!("hello world");
 }
 
-fn cleanup_entities(
-    mut commands: Commands,
-    mut renderables_to_remove: ResMut<RenderablesToRemove>,
-    mut query: Query<(Entity, &Named)>,
-) {
-    for (entity, name) in query.iter_mut() {
-        if renderables_to_remove
-            .drain(..)
-            .any(|value| value == name.to_string())
-        {
-            commands.entity(entity).despawn();
-        }
-    }
-}
+// fn cleanup_entities(
+//     mut commands: Commands,
+//     mut renderables_to_remove: ResMut<RenderablesToRemove>,
+//     mut query: Query<(Entity, &GodotId)>,
+// ) {
+//     for (entity, id) in query.iter_mut() {
+//         if renderables_to_remove
+//             .drain(..)
+//             .any(|value| value == name.to_string())
+//         {
+//             commands.entity(entity).despawn();
+//         }
+//     }
+// }
 
 fn handle_input(
     mut input_queue: ResMut<InputQueue>,
     mut godot_data: ResMut<GodotData>,
-    mut query: Query<(&Named, &mut Renderable)>,
+    mut query: Query<(&Player, &GodotId, &mut Renderable)>,
 ) {
-    for (n, mut r) in query.iter_mut() {
+    for (p, id, mut r) in query.iter_mut() {
         for input in input_queue.read_all() {
             match input {
-                GodotInput::MoveUp => r.y -= 1.0,
-                GodotInput::MoveDown => r.y += 1.0,
-                GodotInput::MoveLeft => r.x -= 1.0,
-                GodotInput::MoveRight => r.x += 1.0,
+                GodotInput::MoveUp => r.0.y -= 1.0,
+                GodotInput::MoveDown => r.0.y += 1.0,
+                GodotInput::MoveLeft => r.0.x -= 1.0,
+                GodotInput::MoveRight => r.0.x += 1.0,
             }
         }
-        let data = godot_data.get_mut(n).unwrap();
-        data.x = r.x;
-        data.y = r.y;
+        let data = godot_data.0.get_mut(&id.0).unwrap();
+        data.x = r.0.x;
+        data.y = r.0.y;
+    }
+}
+
+fn mob_movement(
+    mut godot_data: ResMut<GodotData>,
+    delta: Res<Delta>,
+    mut query: Query<(&GodotId, &mut Renderable, &Velocity)>,
+) {
+    for (id, mut r, v) in query.iter_mut() {
+        r.0.x += v.0.x * delta.0;
+        r.0.y += v.0.y * delta.0;
+
+        let data = godot_data.0.get_mut(&id.0).unwrap();
+        data.x = r.0.x;
+        data.y = r.0.y;
     }
 }
 
 #[warn(dead_code)]
 fn debug_print_positions(query: Query<&Renderable>) {
     for r in query.iter() {
-        godot_print!("{}, {}", r.x, r.y)
+        godot_print!("{}, {}", r.0.x, r.0.y)
     }
 }

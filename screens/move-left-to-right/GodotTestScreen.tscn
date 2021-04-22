@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=2]
+
+[ext_resource path="res://screens/move-left-to-right/PerformanceMonitorUI.tscn" type="PackedScene" id=1]
+[ext_resource path="res://screens/move-left-to-right/GodotTestScreen.gd" type="Script" id=2]
+
+[node name="GodotTestScreen" type="Node2D"]
+script = ExtResource( 2 )
+
+[node name="PerformanceMonitorUI" parent="." instance=ExtResource( 1 )]

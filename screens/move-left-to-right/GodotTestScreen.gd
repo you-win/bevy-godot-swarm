@@ -1,22 +1,22 @@
-extends Polygon2D
+extends Node2D
 
-var entity_id: int
+const SPAWNER: Resource = preload("res://screens/move-left-to-right/Spawner.tscn")
+const ENTITY: Resource = preload("res://screens/move-left-to-right/TestEntityGodot.tscn")
 
 ###############################################################################
 # Builtin functions                                                           #
 ###############################################################################
 
 func _ready() -> void:
-	GameManager.entity_counter += 1
-	entity_id = GameManager.entity_counter
+	var screen_size: Vector2 = get_viewport().size
 	
-	GameManager.ecs.register_player(entity_id, global_position)
-
-func _physics_process(delta: float) -> void:
-	self.global_position = GameManager.ecs.read_data(entity_id)
-
-func _exit_tree():
-	GameManager.ecs.unregister_entity(entity_id)
+	for i in int(screen_size.y / 50):
+		var spawner: Node2D = SPAWNER.instance()
+		
+		spawner.entity = ENTITY
+		call_deferred("add_child", spawner)
+		
+		spawner.position.y = i * 50
 
 ###############################################################################
 # Connections                                                                 #

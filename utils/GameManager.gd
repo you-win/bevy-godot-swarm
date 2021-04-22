@@ -8,6 +8,8 @@ var current_save_data: Dictionary
 
 var ecs = load("res://utils/ECS.gdns").new()
 
+var entity_counter: int = 0
+
 ###############################################################################
 # Builtin functions                                                           #
 ###############################################################################

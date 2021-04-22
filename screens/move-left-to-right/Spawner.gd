@@ -1,26 +1,29 @@
-extends Polygon2D
+extends Position2D
 
-var entity_id: int
+const DURATION: float = 0.5
+
+export var entity: Resource
+
+onready var timer: Timer = $Timer
 
 ###############################################################################
 # Builtin functions                                                           #
 ###############################################################################
 
 func _ready() -> void:
-	GameManager.entity_counter += 1
-	entity_id = GameManager.entity_counter
-	
-	GameManager.ecs.register_player(entity_id, global_position)
-
-func _physics_process(delta: float) -> void:
-	self.global_position = GameManager.ecs.read_data(entity_id)
-
-func _exit_tree():
-	GameManager.ecs.unregister_entity(entity_id)
+	timer.connect("timeout", self, "_on_timeout")
+	timer.start(DURATION)
 
 ###############################################################################
 # Connections                                                                 #
 ###############################################################################
+
+func _on_timeout() -> void:
+	var entity_instance: Node2D = entity.instance()
+	entity_instance.global_position = self.global_position
+	get_parent().call_deferred("add_child", entity_instance)
+	
+	timer.start(DURATION)
 
 ###############################################################################
 # Private functions                                                           #

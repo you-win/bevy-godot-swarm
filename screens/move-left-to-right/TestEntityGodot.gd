@@ -1,26 +1,23 @@
 extends Polygon2D
 
-var entity_id: int
+var velocity: Vector2 = Vector2(100.0, 0.0)
 
 ###############################################################################
 # Builtin functions                                                           #
 ###############################################################################
 
 func _ready() -> void:
-	GameManager.entity_counter += 1
-	entity_id = GameManager.entity_counter
-	
-	GameManager.ecs.register_player(entity_id, global_position)
+	$VisibilityNotifier2D.connect("screen_exited", self, "_on_exit_screen")
 
 func _physics_process(delta: float) -> void:
-	self.global_position = GameManager.ecs.read_data(entity_id)
-
-func _exit_tree():
-	GameManager.ecs.unregister_entity(entity_id)
+	global_position += velocity * delta
 
 ###############################################################################
 # Connections                                                                 #
 ###############################################################################
+
+func _on_exit_screen() -> void:
+	queue_free()
 
 ###############################################################################
 # Private functions                                                           #
